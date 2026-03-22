@@ -1,35 +1,32 @@
 const { spawn } = require("child_process");
 const crypto = require("crypto");
 
-function quoteArg(arg) {
+function quoteForDisplay(arg) {
   if (arg === "") return '""';
-  if (!/[\s"^&|<>]/.test(arg)) return arg;
-  return `"${String(arg).replace(/(["\\])/g, "\\$1")}"`;
+  if (!/[\s"]/u.test(arg)) return arg;
+  return `"${String(arg).replace(/"/g, '\\"')}"`;
 }
 
 function formatCommand(command, args) {
-  return [command, ...args].map((arg) => quoteArg(String(arg))).join(" ");
+  return [command, ...args].map((arg) => quoteForDisplay(String(arg))).join(" ");
 }
 
 function buildSpawnContext(command, args) {
   const isWindows = process.platform === "win32";
-  const isCodexCommand = command === "codex" || command === "codex.cmd";
-
-  if (isWindows && isCodexCommand) {
-    const innerCommand = formatCommand("codex", args);
-    return {
-      actualCommand: "cmd.exe",
-      actualArgs: ["/d", "/s", "/c", innerCommand],
-      executedCommand: innerCommand,
-      spawnCommand: formatCommand("cmd.exe", ["/d", "/s", "/c", innerCommand])
-    };
-  }
+  const isCodexCommand = command === "codex" || command === "codex";
 
   return {
-    actualCommand: command,
+    actualCommand: isWindows && isCodexCommand ? "codex" : command,
     actualArgs: args,
-    executedCommand: formatCommand(command, args),
-    spawnCommand: formatCommand(command, args)
+    executedCommand: formatCommand(
+      isWindows && isCodexCommand ? "codex" : command,
+      args
+    ),
+    spawnCommand: formatCommand(
+      isWindows && isCodexCommand ? "codex" : command,
+      args
+    ),
+    useShell: isWindows && isCodexCommand
   };
 }
 
@@ -38,21 +35,26 @@ function runProcess(repoPath, command, args, options = {}) {
     let stdout = "";
     let stderr = "";
 
-    const { actualCommand, actualArgs, executedCommand, spawnCommand } = buildSpawnContext(
-      command,
-      args
-    );
+    const {
+      actualCommand,
+      actualArgs,
+      executedCommand,
+      spawnCommand,
+      useShell
+    } = buildSpawnContext(command, args);
 
     console.log("RUN", {
       cwd: repoPath,
       executedCommand,
-      spawnCommand
+      spawnCommand,
+      useShell,
+      args: actualArgs
     });
 
     const child = spawn(actualCommand, actualArgs, {
       cwd: repoPath,
       env: { ...process.env },
-      shell: false,
+      shell: useShell,
       windowsHide: true
     });
 
@@ -70,10 +72,12 @@ function runProcess(repoPath, command, args, options = {}) {
       });
     }
 
-    if (typeof options.input === "string") {
-      child.stdin.end(options.input);
-    } else {
-      child.stdin.end();
+    if (child.stdin) {
+      if (typeof options.input === "string") {
+        child.stdin.end(options.input);
+      } else {
+        child.stdin.end();
+      }
     }
 
     child.on("close", (code) => {
@@ -101,7 +105,9 @@ async function checkoutBranch(repoPath, branchName) {
   const result = await runGit(repoPath, ["checkout", branchName]);
 
   if (result.code !== 0) {
-    throw new Error(`Failed to check out '${branchName}'.\n${result.stderr || result.stdout}`.trim());
+    throw new Error(
+      `Failed to check out '${branchName}'.\n${result.stderr || result.stdout}`.trim()
+    );
   }
 }
 
@@ -113,7 +119,9 @@ async function createCodexBranch(repoPath, baseBranch = "main") {
   const createResult = await runGit(repoPath, ["checkout", "-b", branchName]);
 
   if (createResult.code !== 0) {
-    throw new Error(`Failed to create branch '${branchName}'.\n${createResult.stderr || createResult.stdout}`.trim());
+    throw new Error(
+      `Failed to create branch '${branchName}'.\n${createResult.stderr || createResult.stdout}`.trim()
+    );
   }
 
   return { branchName, baseBranch };

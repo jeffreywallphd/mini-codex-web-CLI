@@ -2,7 +2,7 @@ const { runProcess } = require("./git");
 
 const EXECUTION_MODE_FLAGS = {
   read: [],
-  write: ["--full-auto", "--ask-for-approval", "on-failure", "--sandbox", "workspace-write"]
+  write: ["--full-auto", "--sandbox", "workspace-write"]
 };
 
 function extractCreditsRemaining(text) {
@@ -33,6 +33,9 @@ function buildCodexExecArgs(prompt, executionMode = "read") {
 
 async function runCommand(repoPath, commandArgs, options = {}) {
   const [command, ...args] = commandArgs;
+  console.log(command);
+  console.log(args);
+  console.log(options);
   return runProcess(repoPath, command, args, options);
 }
 
