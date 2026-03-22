@@ -1,8 +1,8 @@
 const { runProcess } = require("./git");
 
 const EXECUTION_MODE_FLAGS = {
-  readonly: ["--suggest"],
-  "auto-edit": ["--auto-edit"],
+  readonly: ["-s", "read-only"],
+  "auto-edit": ["-s", "workspace-write"],
   "full-auto": ["--full-auto"]
 };
 
@@ -28,7 +28,7 @@ function buildCodexExecArgs(prompt, executionMode = "readonly") {
     return ["exec", ...modeArgs];
   }
 
-  return ["exec", ...modeArgs, "-"];
+  return ["exec", ...modeArgs, trimmedPrompt];
 }
 
 function getCodexExecInput(prompt) {
@@ -48,10 +48,11 @@ async function runCodexWithUsage(repoPath, prompt, executionMode = "readonly") {
     [statusBefore.stdout, statusBefore.stderr].filter(Boolean).join("\n")
   );
 
+  console.log(["codex", ...buildCodexExecArgs(prompt, executionMode)]);
+
   const result = await runCommand(
     repoPath,
-    ["codex", ...buildCodexExecArgs(prompt, executionMode)],
-    { input: getCodexExecInput(prompt) }
+    ["codex", ...buildCodexExecArgs(prompt, executionMode)]
   );
 
   const statusAfter = await runCommand(repoPath, ["codex", "status"]);

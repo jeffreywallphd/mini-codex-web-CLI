@@ -6,20 +6,37 @@ function runProcess(repoPath, command, args, options = {}) {
     let stdout = "";
     let stderr = "";
 
-    const child = spawn(command, args, {
+    const isWindows = process.platform === "win32";
+    const isCodexCommand = command === "codex" || command === "codex.cmd";
+
+    const actualCommand = isWindows && isCodexCommand ? "cmd.exe" : command;
+    const actualArgs =
+      isWindows && isCodexCommand
+        ? ["/d", "/s", "/c", "codex", ...args]
+        : args;
+
+    console.log("RUN", { actualCommand, actualArgs });
+
+    const child = spawn(actualCommand, actualArgs, {
       cwd: repoPath,
       env: { ...process.env },
-      shell: process.platform === "win32",
+      shell: false,
       windowsHide: true
     });
 
     child.on("error", reject);
-    child.stdout.on("data", (data) => {
-      stdout += data.toString();
-    });
-    child.stderr.on("data", (data) => {
-      stderr += data.toString();
-    });
+
+    if (child.stdout) {
+      child.stdout.on("data", (data) => {
+        stdout += data.toString();
+      });
+    }
+
+    if (child.stderr) {
+      child.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+    }
 
     if (typeof options.input === "string") {
       child.stdin.end(options.input);
