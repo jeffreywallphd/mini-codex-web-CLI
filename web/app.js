@@ -49,19 +49,18 @@ function cleanOutput(text) {
 }
 
 function renderRun(run) {
-  const credits =
-    run.credits_remaining ??
-    run.creditsRemaining;
+  const credits = run.credits_remaining ?? run.creditsRemaining;
+  const usage = run.usage_delta ?? run.usageDelta;
 
   promptDetail.textContent = run.prompt || "(none)";
 
   const parts = [
     `Run ID: ${run.id ?? run.runId ?? ""}`,
     `Project: ${run.project_name ?? run.projectName ?? ""}`,
-    credits !== undefined && credits !== null ? `Credits Remaining: ${credits}` : "",
+    credits !== undefined && credits !== null ? `Credits Remaining: ${credits}` : "Credits Remaining: (not available)",
     `Exit Code: ${run.code ?? ""}`,
     run.created_at ? `Created: ${run.created_at}` : "",
-    run.usage_delta ? `Usage: ${run.usage_delta}` : "Usage: (not calculated)",
+    usage !== undefined && usage !== null ? `Usage: ${usage}` : "Usage: (not calculated)",
     "",
     "Response",
     "--------",
@@ -179,8 +178,8 @@ runButton.addEventListener("click", async () => {
       stderr: result.stderr,
       projectName,
       prompt,
-      creditsRemaining: result.creditsRemaining,
-      usage_delta: result.usageDelta
+      creditsRemaining: result.creditsRemaining ? result.creditsRemaining : "unavailable",
+      usageDelta: result.usageDelta ? result.usageDelta : "unavailable"
     });
 
     if (result.creditsRemaining !== undefined) {

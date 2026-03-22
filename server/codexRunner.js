@@ -31,13 +31,21 @@ function runCommand(repoPath, commandArgs) {
 }
 
 async function runCodexWithUsage(repoPath, prompt) {
+  // At the moment, status is only for sessions. Codex is not running sessions, so status is not yet usable. 
+  // Leaving this here for now in case that changes in the future.
   const statusBefore = await runCommand(repoPath, ["codex", "status"]);
-  const beforeCredits = extractCreditsRemaining(statusBefore.stdout);
+  
+  const beforeCredits = extractCreditsRemaining(
+    [statusBefore.stdout, statusBefore.stderr].filter(Boolean).join("\n")
+  );
 
   const result = await runCommand(repoPath, ["codex", "exec", prompt]);
 
   const statusAfter = await runCommand(repoPath, ["codex", "status"]);
-  const afterCredits = extractCreditsRemaining(statusAfter.stdout);
+  
+  const afterCredits = extractCreditsRemaining(
+    [statusAfter.stdout, statusAfter.stderr].filter(Boolean).join("\n")
+  );
 
   let usageDelta = null;
 
@@ -47,8 +55,8 @@ async function runCodexWithUsage(repoPath, prompt) {
 
   return {
     ...result,
-    statusBefore: statusBefore.stdout,
-    statusAfter: statusAfter.stdout,
+    statusBefore: [statusBefore.stdout, statusBefore.stderr].filter(Boolean).join("\n"),
+    statusAfter: [statusAfter.stdout, statusAfter.stderr].filter(Boolean).join("\n"),
     usageDelta,
     creditsRemaining: afterCredits
   };
