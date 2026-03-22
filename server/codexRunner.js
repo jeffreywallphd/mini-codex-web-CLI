@@ -1,9 +1,9 @@
 const { runProcess } = require("./git");
 
 const EXECUTION_MODE_FLAGS = {
-  readonly: "--suggest",
-  "auto-edit": "--auto-edit",
-  "full-auto": "--full-auto"
+  readonly: "-- --suggest",
+  "auto-edit": "-- --auto-edit",
+  "full-auto": "-- --full-auto"
 };
 
 function extractCreditsRemaining(text) {
