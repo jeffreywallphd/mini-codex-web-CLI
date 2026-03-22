@@ -9,7 +9,7 @@ Mini Codex Web CLI keeps the workflow intentionally small:
 - pick a local repository that lives on the LAN host machine
 - choose a Codex execution mode
 - create an isolated working branch before each run
-- send a prompt to Codex CLI
+- send a prompt to Codex via `@openai/codex-sdk`
 - review that single run on its own details page
 - optionally merge the generated branch back into `main`
 
@@ -18,12 +18,12 @@ The app is designed for personal LAN use, not for public internet exposure or mu
 ## Features
 
 - Repository picker for local Git repositories
-- Codex execution mode selector with Read Mode and Write Mode (`--full-auto`, `--ask-for-approval on-failure`, `--sandbox workspace-write`)
+- Codex execution mode selector with Read Mode and Write Mode (SDK thread options use `workspace-write` sandboxing and `on-failure` approvals in write mode)
 - Automatic branch creation from `main` before every run using `codex-<10 hex chars>` naming
 - Dedicated run details page for each prompt run
 - Git status display and one-tap merge action from the run details page
 - Recent run history with search
-- Basic usage tracking (credits remaining + per-run estimate)
+- Basic usage tracking when the SDK returns usage data
 - SQLite storage with no external database
 - Mobile-friendly, lightweight UI intended for LAN access
 
@@ -45,7 +45,7 @@ Your local repositories should live in a separate projects directory referenced 
 - Node.js 18+
 - npm
 - Git available on the machine that runs this server
-- Codex CLI installed and available on the server machine PATH
+- Codex SDK installed with the app dependencies (`@openai/codex-sdk`), which launches the local Codex CLI binary bundled by `@openai/codex`
 
 ## Installation
 
@@ -91,7 +91,7 @@ http://192.168.x.x:3000
 ## Usage Flow
 
 1. Select a repository.
-2. Select Read Mode for a standard `codex exec` run, or Write Mode to add `--full-auto` plus explicit `--ask-for-approval on-failure --sandbox workspace-write` flags.
+2. Select Read Mode for a standard Codex SDK turn, or Write Mode to run with `workspace-write` sandboxing plus `on-failure` approvals through the SDK.
 3. Enter a prompt.
 4. Click **Run**.
 5. The server checks out local `main`, creates a new `codex-xxxxxxxxxx` branch, then runs Codex in the selected mode.
@@ -104,7 +104,6 @@ http://192.168.x.x:3000
 - The app creates a new branch named `codex-<10 hex chars>`.
 - Codex executes only after the branch checkout succeeds.
 - The run details page shows the stored `git status --short --branch` output.
-- The run details page also stores and shows the exact Codex command requested plus the final spawned command line (including the Windows `cmd.exe` wrapper when applicable).
 - Merge runs are performed by the server with Git and recorded in SQLite.
 - If a merge succeeds, the merge button is disabled for that run.
 
@@ -127,8 +126,8 @@ This application is meant for trusted LAN usage only.
 ## Limitations
 
 - The app assumes each selected repository has a local `main` branch.
-- Usage tracking is best-effort and depends on Codex CLI output format.
-- Windows support depends on Node, Git, and Codex CLI being available in the server environment PATH. OpenAI's Codex CLI documentation currently lists Windows 11 via WSL2 as the supported Windows setup, so native `cmd.exe` usage may still be limited by upstream Codex behavior.
+- Usage tracking comes from the SDK response when available; credits-remaining values are no longer captured separately.
+- Windows support depends on Node, Git, and the Codex SDK's bundled Codex CLI binary being usable in the server environment. Upstream Codex platform support still applies.
 - There is no authentication, authorization, or multi-user isolation.
 
 ## License

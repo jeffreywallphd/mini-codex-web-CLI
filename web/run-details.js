@@ -62,6 +62,7 @@ function renderRun(run) {
     .filter(Boolean)
     .map((command, index) => (index === 0 ? `Requested: ${command}` : `Spawned:   ${command}`))
     .join("\n");
+  const commandText = executedCommand || "Handled internally by @openai/codex-sdk.";
 
   runSummary.innerHTML = `
     <div><strong>Run ID</strong><span>${run.id}</span></div>
@@ -77,7 +78,7 @@ function renderRun(run) {
 
   promptDetail.textContent = run.prompt || "(none)";
   gitStatusDetail.textContent = run.git_status || "(none)";
-  commandDetail.textContent = executedCommand || "(not captured for this run)";
+  commandDetail.textContent = commandText;
   stderrDetail.textContent = run.stderr || "(none)";
   mergeDetail.textContent = mergeOutput || "No merge attempted.";
 

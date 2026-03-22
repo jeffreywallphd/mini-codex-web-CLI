@@ -1,82 +1,83 @@
-const { runProcess } = require("./git");
-
-const EXECUTION_MODE_FLAGS = {
-  read: [],
-  write: ["--full-auto", "--sandbox", "workspace-write"]
+const EXECUTION_MODE_OPTIONS = {
+  read: {},
+  write: {
+    sandboxMode: "workspace-write",
+    approvalPolicy: "on-failure"
+  }
 };
 
-function extractCreditsRemaining(text) {
-  if (!text) return null;
-
-  const match =
-    text.match(/remaining[:\s]+([\d.]+)/i) ||
-    text.match(/credits[:\s]+([\d.]+)/i);
-
-  return match ? parseFloat(match[1]) : null;
-}
+let codexSdkModulePromise;
 
 function normalizePrompt(prompt) {
   return typeof prompt === "string" ? prompt.trim() : "";
 }
 
-function buildCodexExecArgs(prompt, executionMode = "read") {
-  const modeArgs = EXECUTION_MODE_FLAGS[executionMode] || EXECUTION_MODE_FLAGS.read;
-  const trimmedPrompt = normalizePrompt(prompt);
-  const args = ["exec", ...modeArgs];
-
-  if (!trimmedPrompt) {
-    return args;
-  }
-
-  return [...args, trimmedPrompt];
+function buildThreadOptions(repoPath, executionMode = "read") {
+  return {
+    workingDirectory: repoPath,
+    ...(EXECUTION_MODE_OPTIONS[executionMode] || EXECUTION_MODE_OPTIONS.read)
+  };
 }
 
-async function runCommand(repoPath, commandArgs, options = {}) {
-  const [command, ...args] = commandArgs;
-  console.log(command);
-  console.log(args);
-  console.log(options);
-  return runProcess(repoPath, command, args, options);
+function formatUsageSummary(usage) {
+  if (!usage || typeof usage !== "object") {
+    return null;
+  }
+
+  const parts = [];
+
+  if (typeof usage.input_tokens === "number") {
+    parts.push(`input=${usage.input_tokens}`);
+  }
+
+  if (typeof usage.output_tokens === "number") {
+    parts.push(`output=${usage.output_tokens}`);
+  }
+
+  if (typeof usage.total_tokens === "number") {
+    parts.push(`total=${usage.total_tokens}`);
+  }
+
+  if (parts.length > 0) {
+    return parts.join(", ");
+  }
+
+  return JSON.stringify(usage);
+}
+
+async function loadCodexSdk() {
+  codexSdkModulePromise ||= import("@openai/codex-sdk");
+  return codexSdkModulePromise;
+}
+
+async function runCodexWithSdk(repoPath, prompt, executionMode = "read") {
+  const { Codex } = await loadCodexSdk();
+  const codex = new Codex();
+  const thread = codex.startThread(buildThreadOptions(repoPath, executionMode));
+  const result = await thread.run(normalizePrompt(prompt));
+
+  return {
+    code: 0,
+    stdout: result.finalResponse || "",
+    stderr: "",
+    executedCommand: null,
+    spawnCommand: null,
+    statusBefore: "Not captured when using @openai/codex-sdk.",
+    statusAfter: "Not captured when using @openai/codex-sdk.",
+    usageDelta: formatUsageSummary(result.usage),
+    creditsRemaining: null,
+    executionMode
+  };
 }
 
 async function runCodexWithUsage(repoPath, prompt, executionMode = "read") {
-  const statusBefore = await runCommand(repoPath, ["codex", "status"]);
-
-  const beforeCredits = extractCreditsRemaining(
-    [statusBefore.stdout, statusBefore.stderr].filter(Boolean).join("\n")
-  );
-
-  const commandArgs = ["codex", ...buildCodexExecArgs(prompt, executionMode)];
-  const result = await runCommand(repoPath, commandArgs);
-
-  const statusAfter = await runCommand(repoPath, ["codex", "status"]);
-
-  const afterCredits = extractCreditsRemaining(
-    [statusAfter.stdout, statusAfter.stderr].filter(Boolean).join("\n")
-  );
-
-  let usageDelta = null;
-
-  if (beforeCredits !== null && afterCredits !== null) {
-    usageDelta = (beforeCredits - afterCredits).toFixed(4);
-  }
-
-  return {
-    ...result,
-    executionMode,
-    executedCommand: result.executedCommand,
-    spawnCommand: result.spawnCommand,
-    statusBefore: [statusBefore.stdout, statusBefore.stderr].filter(Boolean).join("\n"),
-    statusAfter: [statusAfter.stdout, statusAfter.stderr].filter(Boolean).join("\n"),
-    usageDelta,
-    creditsRemaining: afterCredits
-  };
+  return runCodexWithSdk(repoPath, prompt, executionMode);
 }
 
 module.exports = {
   runCodexWithUsage,
-  EXECUTION_MODE_FLAGS,
-  buildCodexExecArgs,
-  extractCreditsRemaining,
+  EXECUTION_MODE_OPTIONS,
+  buildThreadOptions,
+  formatUsageSummary,
   normalizePrompt
 };
