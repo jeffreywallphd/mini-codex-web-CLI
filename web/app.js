@@ -83,7 +83,10 @@ function renderRunsList(runs) {
   for (const run of runs) {
     const li = document.createElement("li");
     const button = document.createElement("button");
-    const promptPreview = (run.prompt || "").replace(/\s+/g, " ").slice(0, 80);
+    const promptPreview = (run.prompt || "")
+        .replace(/\s+/g, " ")
+        .slice(0, 280)
+        + ((run.prompt || "").length > 280 ? "..." : "");
     button.textContent = `#${run.id} - ${run.project_name} - ${promptPreview || "(no prompt)"}`;
     button.onclick = () => loadRunDetail(run.id);
     li.appendChild(button);
