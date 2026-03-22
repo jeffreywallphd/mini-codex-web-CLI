@@ -5,7 +5,7 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 
-const { runCodexWithUsage, EXECUTION_MODE_FLAGS } = require("./codexRunner");
+const { runCodexWithUsage, EXECUTION_MODE_OPTIONS } = require("./codexRunner");
 const { saveRun, getRuns, getRunById, updateRunMerge } = require("./db");
 const { createCodexBranch, getGitStatus, mergeBranch } = require("./git");
 
@@ -39,7 +39,7 @@ app.get("/api/projects", (req, res) => {
 app.post("/api/run-test", async (req, res) => {
   const { projectName, prompt, executionMode = "read" } = req.body;
 
-  if (!EXECUTION_MODE_FLAGS[executionMode]) {
+  if (!EXECUTION_MODE_OPTIONS[executionMode]) {
     return res.status(400).json({ error: "Invalid execution mode" });
   }
 

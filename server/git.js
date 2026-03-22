@@ -13,20 +13,25 @@ function formatCommand(command, args) {
 
 function buildSpawnContext(command, args) {
   const isWindows = process.platform === "win32";
-  const isCodexCommand = command === "codex" || command === "codex";
+  const isCodexCommand = command === "codex";
+  const requestedCommand = formatCommand(command, args);
+
+  if (isWindows && isCodexCommand) {
+    return {
+      actualCommand: "cmd.exe",
+      actualArgs: ["/d", "/s", "/c", requestedCommand],
+      executedCommand: requestedCommand,
+      spawnCommand: formatCommand("cmd.exe", ["/d", "/s", "/c", requestedCommand]),
+      useShell: false
+    };
+  }
 
   return {
-    actualCommand: isWindows && isCodexCommand ? "codex" : command,
+    actualCommand: command,
     actualArgs: args,
-    executedCommand: formatCommand(
-      isWindows && isCodexCommand ? "codex" : command,
-      args
-    ),
-    spawnCommand: formatCommand(
-      isWindows && isCodexCommand ? "codex" : command,
-      args
-    ),
-    useShell: isWindows && isCodexCommand
+    executedCommand: requestedCommand,
+    spawnCommand: requestedCommand,
+    useShell: false
   };
 }
 

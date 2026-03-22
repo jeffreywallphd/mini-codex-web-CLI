@@ -2,51 +2,41 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
-  EXECUTION_MODE_FLAGS,
-  buildCodexExecArgs,
-  extractCreditsRemaining,
+  EXECUTION_MODE_OPTIONS,
+  buildThreadOptions,
+  formatUsageSummary,
   normalizePrompt
 } = require("./codexRunner");
 
-test("execution mode flags are only set for write mode", () => {
-  assert.deepEqual(EXECUTION_MODE_FLAGS.read, []);
-  assert.deepEqual(buildCodexExecArgs("Please update the README", "read"), [
-    "exec",
-    "Please update the README"
-  ]);
-  assert.deepEqual(buildCodexExecArgs("Please make the change", "write"), [
-    "exec",
-    "--full-auto",
-    "--ask-for-approval",
-    "on-failure",
-    "--sandbox",
-    "workspace-write",
-    "Please make the change"
-  ]);
+test("execution mode options only add sandboxing for write mode", () => {
+  assert.deepEqual(EXECUTION_MODE_OPTIONS.read, {});
+  assert.deepEqual(EXECUTION_MODE_OPTIONS.write, {
+    sandboxMode: "workspace-write",
+    approvalPolicy: "on-failure"
+  });
 });
 
-test("prompts are normalized before being passed to codex exec", () => {
+test("prompts are normalized before being passed to the sdk", () => {
   assert.equal(normalizePrompt("  review base branch safety  "), "review base branch safety");
-  assert.deepEqual(buildCodexExecArgs("  review base branch safety  ", "read"), [
-    "exec",
-    "review base branch safety"
-  ]);
+  assert.equal(normalizePrompt("   "), "");
 });
 
-test("blank prompts do not create extra arguments", () => {
-  assert.deepEqual(buildCodexExecArgs("   ", "read"), ["exec"]);
-  assert.deepEqual(buildCodexExecArgs("   ", "write"), [
-    "exec",
-    "--full-auto",
-    "--ask-for-approval",
-    "on-failure",
-    "--sandbox",
-    "workspace-write"
-  ]);
+test("sdk thread options match the requested execution mode", () => {
+  assert.deepEqual(buildThreadOptions("/tmp/repo", "read"), {
+    workingDirectory: "/tmp/repo"
+  });
+  assert.deepEqual(buildThreadOptions("/tmp/repo", "write"), {
+    workingDirectory: "/tmp/repo",
+    sandboxMode: "workspace-write",
+    approvalPolicy: "on-failure"
+  });
 });
 
-test("credits can be parsed from different status output formats", () => {
-  assert.equal(extractCreditsRemaining("remaining: 42.5"), 42.5);
-  assert.equal(extractCreditsRemaining("Credits 17"), 17);
-  assert.equal(extractCreditsRemaining("no credits here"), null);
+test("usage summaries prefer token counts when available", () => {
+  assert.equal(
+    formatUsageSummary({ input_tokens: 11, output_tokens: 7, total_tokens: 18 }),
+    "input=11, output=7, total=18"
+  );
+  assert.equal(formatUsageSummary({ total_cost_usd: 0.12 }), '{"total_cost_usd":0.12}');
+  assert.equal(formatUsageSummary(null), null);
 });
