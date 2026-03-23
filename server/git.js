@@ -1,5 +1,7 @@
 const { spawn } = require("child_process");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 function quoteForDisplay(arg) {
   if (arg === "") return '""';
@@ -95,6 +97,101 @@ async function runGit(repoPath, args) {
   return runProcess(repoPath, "git", args);
 }
 
+function parseStatusEntries(statusText) {
+  const lines = String(statusText || "").split("\n").slice(1).filter(Boolean);
+
+  return lines.map((line) => {
+    const indexStatus = line.slice(0, 1);
+    const workTreeStatus = line.slice(1, 2);
+    const rawPath = line.slice(3).trim();
+    const pathText = rawPath.includes(" -> ") ? rawPath.split(" -> ").pop() : rawPath;
+
+    return {
+      indexStatus,
+      workTreeStatus,
+      path: pathText,
+      rawPath
+    };
+  });
+}
+
+async function getDiffForPath(repoPath, relativePath) {
+  const trackedDiff = await runGit(repoPath, ["diff", "--", relativePath]);
+  const stagedDiff = await runGit(repoPath, ["diff", "--cached", "--", relativePath]);
+  const combined = [stagedDiff.stdout, trackedDiff.stdout].filter(Boolean).join("\n").trim();
+
+  if (combined) {
+    return combined;
+  }
+
+  const absolutePath = path.join(repoPath, relativePath);
+
+  if (fs.existsSync(absolutePath)) {
+    const untrackedDiff = await runGit(repoPath, ["diff", "--no-index", "--", "/dev/null", relativePath]);
+    if (untrackedDiff.stdout || untrackedDiff.stderr) {
+      return [untrackedDiff.stdout, untrackedDiff.stderr].filter(Boolean).join("\n").trim();
+    }
+  }
+
+  return "";
+}
+
+async function getGitSnapshot(repoPath) {
+  const statusResult = await runGit(repoPath, ["status", "--short", "--branch"]);
+  const files = parseStatusEntries(statusResult.stdout);
+  const diffs = {};
+
+  for (const file of files) {
+    diffs[file.path] = await getDiffForPath(repoPath, file.path);
+  }
+
+  return {
+    gitStatus: [statusResult.stdout, statusResult.stderr].filter(Boolean).join("\n").trim(),
+    files,
+    diffs
+  };
+}
+
+async function hasStagedChanges(repoPath) {
+  const result = await runGit(repoPath, ["diff", "--cached", "--quiet"]);
+  return result.code === 1;
+}
+
+async function stageAllChanges(repoPath) {
+  const result = await runGit(repoPath, ["add", "-A"]);
+
+  if (result.code !== 0) {
+    throw new Error(`Failed to stage changes.\n${result.stderr || result.stdout}`.trim());
+  }
+}
+
+async function commitAllChanges(repoPath, title, description = "") {
+  await stageAllChanges(repoPath);
+
+  if (!(await hasStagedChanges(repoPath))) {
+    return {
+      code: 0,
+      stdout: "No changes to commit.",
+      stderr: "",
+      skipped: true
+    };
+  }
+
+  const args = ["commit", "-m", title];
+
+  if (description.trim()) {
+    args.push("-m", description.trim());
+  }
+
+  const result = await runGit(repoPath, args);
+
+  if (result.code !== 0) {
+    throw new Error(`Failed to commit changes.\n${result.stderr || result.stdout}`.trim());
+  }
+
+  return result;
+}
+
 async function assertLocalBranchExists(repoPath, branchName) {
   const result = await runGit(repoPath, ["rev-parse", "--verify", branchName]);
 
@@ -133,28 +230,98 @@ async function createCodexBranch(repoPath, baseBranch = "main") {
 }
 
 async function getGitStatus(repoPath) {
-  const result = await runGit(repoPath, ["status", "--short", "--branch"]);
-  return [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+  const snapshot = await getGitSnapshot(repoPath);
+  return snapshot.gitStatus;
 }
 
-async function mergeBranch(repoPath, branchName, baseBranch = "main") {
+async function mergeBranch(
+  repoPath,
+  branchName,
+  baseBranch = "main",
+  title = "Codex changes",
+  description = ""
+) {
   await assertLocalBranchExists(repoPath, baseBranch);
+  await assertLocalBranchExists(repoPath, branchName);
+  await checkoutBranch(repoPath, branchName);
+
+  const branchCommit = await commitAllChanges(repoPath, title, description);
   await checkoutBranch(repoPath, baseBranch);
 
-  const mergeResult = await runGit(repoPath, ["merge", branchName]);
+  const mergeArgs = ["merge", "--no-ff", branchName, "-m", title];
+  if (description.trim()) {
+    mergeArgs.push("-m", description.trim());
+  }
+
+  const mergeResult = await runGit(repoPath, mergeArgs);
+
+  if (mergeResult.code !== 0) {
+    throw new Error(`Failed to merge '${branchName}' into '${baseBranch}'.\n${mergeResult.stderr || mergeResult.stdout}`.trim());
+  }
+
+  const postMergeCommit = await commitAllChanges(repoPath, title, description);
+  const pushResult = await runGit(repoPath, ["push", "origin", baseBranch]);
+
+  if (pushResult.code !== 0) {
+    throw new Error(`Failed to push '${baseBranch}' to origin.\n${pushResult.stderr || pushResult.stdout}`.trim());
+  }
+
+  const deleteResult = await runGit(repoPath, ["branch", "-d", branchName]);
+
+  if (deleteResult.code !== 0) {
+    throw new Error(`Failed to delete branch '${branchName}'.\n${deleteResult.stderr || deleteResult.stdout}`.trim());
+  }
+
   const gitStatus = await getGitStatus(repoPath);
+  const stdout = [
+    "Branch Commit",
+    "--------",
+    branchCommit.stdout || "No changes to commit.",
+    "",
+    "Merge",
+    "--------",
+    mergeResult.stdout || "(none)",
+    "",
+    "Post-Merge Commit",
+    "--------",
+    postMergeCommit.stdout || "No changes to commit.",
+    "",
+    "Push",
+    "--------",
+    pushResult.stdout || "(none)",
+    "",
+    "Delete Branch",
+    "--------",
+    deleteResult.stdout || "(none)"
+  ].join("\n").trim();
+  const stderr = [
+    branchCommit.stderr,
+    mergeResult.stderr,
+    postMergeCommit.stderr,
+    pushResult.stderr,
+    deleteResult.stderr
+  ].filter(Boolean).join("\n\n").trim();
 
   return {
     ...mergeResult,
-    gitStatus
+    stdout,
+    stderr,
+    gitStatus,
+    pushStdout: pushResult.stdout,
+    pushStderr: pushResult.stderr,
+    deleteStdout: deleteResult.stdout,
+    deleteStderr: deleteResult.stderr
   };
 }
 
 module.exports = {
   buildSpawnContext,
+  commitAllChanges,
   createCodexBranch,
   formatCommand,
   getGitStatus,
+  getGitSnapshot,
   mergeBranch,
+  parseStatusEntries,
   runProcess
 };

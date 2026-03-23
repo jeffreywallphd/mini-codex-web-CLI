@@ -56,7 +56,10 @@ function renderStatus(run) {
   }
 
   if (run.code === 0) {
-    statusBox.textContent = `Run completed on ${run.branchName || run.branch_name || "new branch"}.`;
+    const title = run.changeTitle || run.change_title;
+    statusBox.textContent = title
+      ? `Run completed on ${run.branchName || run.branch_name || "new branch"}: ${title}.`
+      : `Run completed on ${run.branchName || run.branch_name || "new branch"}.`;
     return;
   }
 
@@ -85,7 +88,8 @@ function renderRunsList(runs) {
     const promptPreview = `${(run.prompt || "").replace(/\s+/g, " ").slice(0, 120)}${(run.prompt || "").length > 120 ? "..." : ""}`;
     const mergeBadge = run.merged_at ? " · merged" : "";
     const executionMode = run.execution_mode === "write" ? "Write Mode" : "Read Mode";
-    button.textContent = `#${run.id} · ${run.project_name} · ${executionMode} · ${run.branch_name || "(no branch)"}${mergeBadge}\n${promptPreview || "(no prompt)"}`;
+    const title = run.change_title ? `\nTitle: ${run.change_title}` : "";
+    button.textContent = `#${run.id} · ${run.project_name} · ${executionMode} · ${run.branch_name || "(no branch)"}${mergeBadge}${title}\n${promptPreview || "(no prompt)"}`;
     button.onclick = () => {
       saveEditorState();
       window.location.href = `/run-details.html?id=${run.id}`;

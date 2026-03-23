@@ -30,6 +30,7 @@
     <details>
       <summary>Git Status</summary>
       <pre id="gitStatusDetail">Loading...</pre>
+      <div id="gitFilesList" class="git-files-list"></div>
     </details>
 
     <details>
@@ -49,6 +50,14 @@
 
     <pre id="runDetail">Loading...</pre>
   </main>
+
+  <div id="diffModal" class="diff-modal hidden" aria-hidden="true">
+    <div class="diff-modal__header">
+      <strong id="diffModalTitle">Diff</strong>
+      <button id="closeDiffButton" class="secondary-button diff-modal__close">Close</button>
+    </div>
+    <div id="diffModalBody" class="diff-modal__body"></div>
+  </div>
 
   <script src="/run-details.js"></script>
 </body>

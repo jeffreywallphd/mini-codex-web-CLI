@@ -7,7 +7,7 @@ const fs = require("fs");
 
 const { runCodexWithUsage, EXECUTION_MODE_OPTIONS } = require("./codexRunner");
 const { saveRun, getRuns, getRunById, updateRunMerge } = require("./db");
-const { createCodexBranch, getGitStatus, mergeBranch } = require("./git");
+const { createCodexBranch, getGitSnapshot, mergeBranch } = require("./git");
 
 const app = express();
 app.use(cors());
@@ -26,6 +26,24 @@ function isValidProject(name) {
 
 function getRepoPath(projectName) {
   return path.join(PROJECTS_DIR, projectName);
+}
+
+function parseJson(value, fallback) {
+  try {
+    return JSON.parse(value ?? JSON.stringify(fallback));
+  } catch (error) {
+    return fallback;
+  }
+}
+
+function hydrateRun(run) {
+  if (!run) return run;
+
+  return {
+    ...run,
+    git_status_files: parseJson(run.git_status_files, []),
+    git_diff_map: parseJson(run.git_diff_map, {})
+  };
 }
 
 app.get("/api/projects", (req, res) => {
@@ -57,14 +75,16 @@ app.post("/api/run-test", async (req, res) => {
   try {
     const branchInfo = await createCodexBranch(repoPath);
     const result = await runCodexWithUsage(repoPath, prompt, executionMode);
-    const gitStatus = await getGitStatus(repoPath);
+    const gitSnapshot = await getGitSnapshot(repoPath);
 
     const runId = await saveRun({
       projectName,
       prompt,
       ...branchInfo,
       ...result,
-      gitStatus
+      gitStatus: gitSnapshot.gitStatus,
+      gitStatusFiles: gitSnapshot.files,
+      gitDiffMap: gitSnapshot.diffs
     });
 
     res.json({
@@ -73,7 +93,9 @@ app.post("/api/run-test", async (req, res) => {
       prompt,
       ...branchInfo,
       ...result,
-      gitStatus,
+      gitStatus: gitSnapshot.gitStatus,
+      gitStatusFiles: gitSnapshot.files,
+      gitDiffMap: gitSnapshot.diffs,
       creditsRemaining: result.creditsRemaining
     });
   } catch (err) {
@@ -89,9 +111,34 @@ app.get("/api/runs", async (req, res) => {
 });
 
 app.get("/api/runs/:id", async (req, res) => {
-  const run = await getRunById(req.params.id);
+  const run = hydrateRun(await getRunById(req.params.id));
   if (!run) return res.status(404).json({ error: "Not found" });
   res.json(run);
+});
+
+app.get("/api/runs/:id/diff", async (req, res) => {
+  const run = hydrateRun(await getRunById(req.params.id));
+
+  if (!run) {
+    return res.status(404).json({ error: "Run not found" });
+  }
+
+  const filePath = req.query.file;
+
+  if (!filePath) {
+    return res.status(400).json({ error: "Missing file path" });
+  }
+
+  const diff = run.git_diff_map?.[filePath];
+
+  if (typeof diff !== "string") {
+    return res.status(404).json({ error: "Diff not found" });
+  }
+
+  res.json({
+    file: filePath,
+    diff
+  });
 });
 
 app.post("/api/runs/:id/merge", async (req, res) => {
@@ -113,12 +160,14 @@ app.post("/api/runs/:id/merge", async (req, res) => {
     const mergeResult = await mergeBranch(
       getRepoPath(run.project_name),
       run.branch_name,
-      run.base_branch || "main"
+      run.base_branch || "main",
+      run.change_title || "Codex changes",
+      run.change_description || ""
     );
 
     await updateRunMerge(run.id, mergeResult);
 
-    const updatedRun = await getRunById(run.id);
+    const updatedRun = hydrateRun(await getRunById(run.id));
     res.json(updatedRun);
   } catch (err) {
     console.error("merge failed:", err);
