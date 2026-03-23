@@ -6,10 +6,34 @@ const EXECUTION_MODE_OPTIONS = {
   }
 };
 
+const CHANGESET_MARKER_START = "<<<CODEX_CHANGESET_START>>>";
+const CHANGESET_MARKER_END = "<<<CODEX_CHANGESET_END>>>";
+const PROMPT_SUFFIX = `
+
+Before you finish, append a machine-readable summary block to the very end of your response using exactly this format:
+${CHANGESET_MARKER_START}
+TITLE: <short title, 80 chars or fewer>
+DESCRIPTION:
+- <short bullet describing a change>
+- <short bullet describing another change if needed>
+${CHANGESET_MARKER_END}
+
+Rules:
+- Include the block exactly once.
+- Keep TITLE short and suitable for a git commit / pull request title.
+- Keep DESCRIPTION textual, concise, and suitable for a commit body / PR summary.
+- Do not wrap the block in backticks.
+`;
+
 let codexSdkModulePromise;
 
 function normalizePrompt(prompt) {
   return typeof prompt === "string" ? prompt.trim() : "";
+}
+
+function buildAugmentedPrompt(prompt) {
+  const normalizedPrompt = normalizePrompt(prompt);
+  return normalizedPrompt ? `${normalizedPrompt}\n${PROMPT_SUFFIX}` : PROMPT_SUFFIX.trim();
 }
 
 function buildThreadOptions(repoPath, executionMode = "read") {
@@ -50,15 +74,42 @@ async function loadCodexSdk() {
   return codexSdkModulePromise;
 }
 
+function parseChangeSummary(text) {
+  const output = typeof text === "string" ? text : "";
+  const match = output.match(
+    new RegExp(
+      `${CHANGESET_MARKER_START}\\s*TITLE:\\s*(.+?)\\s*DESCRIPTION:\\s*([\\s\\S]*?)\\s*${CHANGESET_MARKER_END}`
+    )
+  );
+
+  if (!match) {
+    return {
+      responseText: output.trim(),
+      changeTitle: "",
+      changeDescription: ""
+    };
+  }
+
+  const [, rawTitle, rawDescription] = match;
+  const responseText = output.replace(match[0], "").trim();
+
+  return {
+    responseText,
+    changeTitle: rawTitle.trim(),
+    changeDescription: rawDescription.trim()
+  };
+}
+
 async function runCodexWithSdk(repoPath, prompt, executionMode = "read") {
   const { Codex } = await loadCodexSdk();
   const codex = new Codex();
   const thread = codex.startThread(buildThreadOptions(repoPath, executionMode));
-  const result = await thread.run(normalizePrompt(prompt));
+  const result = await thread.run(buildAugmentedPrompt(prompt));
+  const summary = parseChangeSummary(result.finalResponse || "");
 
   return {
     code: 0,
-    stdout: result.finalResponse || "",
+    stdout: summary.responseText,
     stderr: "",
     executedCommand: null,
     spawnCommand: null,
@@ -66,7 +117,10 @@ async function runCodexWithSdk(repoPath, prompt, executionMode = "read") {
     statusAfter: "Not captured when using @openai/codex-sdk.",
     usageDelta: formatUsageSummary(result.usage),
     creditsRemaining: null,
-    executionMode
+    executionMode,
+    changeTitle: summary.changeTitle,
+    changeDescription: summary.changeDescription,
+    promptWithInstructions: buildAugmentedPrompt(prompt)
   };
 }
 
@@ -78,6 +132,9 @@ module.exports = {
   runCodexWithUsage,
   EXECUTION_MODE_OPTIONS,
   buildThreadOptions,
+  buildAugmentedPrompt,
   formatUsageSummary,
-  normalizePrompt
+  normalizePrompt,
+  parseChangeSummary,
+  PROMPT_SUFFIX
 };

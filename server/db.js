@@ -13,11 +13,17 @@ const RUN_COLUMNS = {
   branch_name: "TEXT",
   base_branch: "TEXT",
   git_status: "TEXT",
+  git_status_files: "TEXT",
+  git_diff_map: "TEXT",
+  change_title: "TEXT",
+  change_description: "TEXT",
+  prompt_with_instructions: "TEXT",
   executed_command: "TEXT",
   spawn_command: "TEXT",
   merge_code: "INTEGER",
   merge_stdout: "TEXT",
   merge_stderr: "TEXT",
+  merge_git_status: "TEXT",
   merged_at: "DATETIME"
 };
 
@@ -75,10 +81,15 @@ function saveRun(run) {
         branch_name,
         base_branch,
         git_status,
+        git_status_files,
+        git_diff_map,
+        change_title,
+        change_description,
+        prompt_with_instructions,
         executed_command,
         spawn_command
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         run.projectName,
         run.prompt,
@@ -93,6 +104,11 @@ function saveRun(run) {
         run.branchName,
         run.baseBranch,
         run.gitStatus,
+        JSON.stringify(run.gitStatusFiles || []),
+        JSON.stringify(run.gitDiffMap || {}),
+        run.changeTitle,
+        run.changeDescription,
+        run.promptWithInstructions,
         run.executedCommand,
         run.spawnCommand
       ],
@@ -107,7 +123,7 @@ function saveRun(run) {
 function getRuns() {
   return new Promise((resolve, reject) => {
     db.all(
-      `SELECT id, project_name, prompt, code, created_at, execution_mode, branch_name, merged_at
+      `SELECT id, project_name, prompt, code, created_at, execution_mode, branch_name, merged_at, change_title
        FROM runs ORDER BY id DESC LIMIT 50`,
       [],
       (err, rows) => (err ? reject(err) : resolve(rows))
@@ -129,7 +145,7 @@ function updateRunMerge(id, mergeResult) {
   return new Promise((resolve, reject) => {
     db.run(
       `UPDATE runs
-       SET git_status = ?,
+       SET merge_git_status = ?,
            merge_code = ?,
            merge_stdout = ?,
            merge_stderr = ?,

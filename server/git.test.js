@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { buildSpawnContext, formatCommand } = require("./git");
+const { buildSpawnContext, formatCommand, parseStatusEntries } = require("./git");
 
 test("formatCommand quotes arguments that need escaping", () => {
   assert.equal(
@@ -46,4 +46,29 @@ test("windows codex commands log both requested and cmd.exe wrapped forms", () =
   } finally {
     Object.defineProperty(process, "platform", { value: originalPlatform });
   }
+});
+
+test("git status porcelain output is parsed into clickable file entries", () => {
+  const files = parseStatusEntries(`## codex-123\n M web/app.js\n?? web/run-details.js\nR  old.js -> new.js`);
+
+  assert.deepEqual(files, [
+    {
+      indexStatus: " ",
+      workTreeStatus: "M",
+      path: "web/app.js",
+      rawPath: "web/app.js"
+    },
+    {
+      indexStatus: "?",
+      workTreeStatus: "?",
+      path: "web/run-details.js",
+      rawPath: "web/run-details.js"
+    },
+    {
+      indexStatus: "R",
+      workTreeStatus: " ",
+      path: "new.js",
+      rawPath: "old.js -> new.js"
+    }
+  ]);
 });
