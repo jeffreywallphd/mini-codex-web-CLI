@@ -1,16 +1,164 @@
 const projectSelect = document.getElementById("projectSelect");
+const pullButton = document.getElementById("pullButton");
+const executionModeSelect = document.getElementById("executionModeSelect");
 const promptInput = document.getElementById("promptInput");
 const runButton = document.getElementById("runButton");
+const refreshRunningButton = document.getElementById("refreshRunningButton");
+const clearStateButton = document.getElementById("clearStateButton");
+const runningProjectHint = document.getElementById("runningProjectHint");
 const runsList = document.getElementById("runsList");
-const runDetail = document.getElementById("runDetail");
-const promptDetail = document.getElementById("promptDetail");
-const stderrDetail = document.getElementById("stderrDetail");
 const statusBox = document.getElementById("statusBox");
 const runSearchInput = document.getElementById("runSearchInput");
-
-let allRuns = [];
-
 const creditsBox = document.getElementById("creditsBox");
+const errorCard = document.getElementById("errorCard");
+const errorCardMessage = document.getElementById("errorCardMessage");
+
+const EDITOR_STATE_KEY = "mini-codex-editor-state";
+let allRuns = [];
+let runningProjects = new Set();
+let isRunningRequestInFlight = false;
+let isPullRequestInFlight = false;
+
+function getEditorState() {
+  return {
+    projectName: projectSelect.value || "",
+    executionMode: executionModeSelect.value || "read",
+    prompt: promptInput.value
+  };
+}
+
+function saveEditorState() {
+  localStorage.setItem(EDITOR_STATE_KEY, JSON.stringify(getEditorState()));
+}
+
+function clearEditorState() {
+  localStorage.removeItem(EDITOR_STATE_KEY);
+  promptInput.value = "";
+  executionModeSelect.value = "read";
+  if (projectSelect.options.length > 0) {
+    projectSelect.selectedIndex = 0;
+  }
+  updateProjectActionState();
+}
+
+function restoreEditorState(projects) {
+  const rawState = localStorage.getItem(EDITOR_STATE_KEY);
+  if (!rawState) return;
+
+  try {
+    const state = JSON.parse(rawState);
+    if (state.executionMode) {
+      executionModeSelect.value = state.executionMode;
+    }
+
+    if (state.prompt) {
+      promptInput.value = state.prompt;
+    }
+
+    if (state.projectName && projects.some((project) => project.name === state.projectName)) {
+      projectSelect.value = state.projectName;
+    }
+  } catch (error) {
+    console.warn("Unable to restore editor state", error);
+  }
+}
+
+function hideErrorCard() {
+  errorCard.classList.add("hidden");
+  errorCardMessage.textContent = "";
+}
+
+function showErrorCard(message) {
+  const normalizedMessage = typeof message === "string" && message.trim()
+    ? message.trim()
+    : "Unknown error.";
+
+  errorCardMessage.textContent = normalizedMessage;
+  errorCard.classList.remove("hidden");
+}
+
+async function parseJsonResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      return await response.json();
+    } catch (error) {
+      return {
+        error: `Could not parse JSON response: ${error.message}`
+      };
+    }
+  }
+
+  const text = await response.text();
+  return {
+    error: text || `Unexpected ${response.status} response from server.`
+  };
+}
+
+function buildErrorMessage(context, result, fallback) {
+  const resultError = result?.error || result?.stderr;
+  if (resultError) {
+    return `${context}: ${resultError}`;
+  }
+
+  return `${context}: ${fallback}`;
+}
+
+function updateProjectActionState() {
+  const projectName = projectSelect.value;
+  const isProjectRunning = projectName && runningProjects.has(projectName);
+
+  runningProjectHint.textContent = isProjectRunning
+    ? `"${projectName}" is currently running. Wait for it to finish or refresh the running-project cache.`
+    : "";
+
+  if (!isRunningRequestInFlight) {
+    runButton.disabled = !projectName || isProjectRunning;
+  }
+
+  if (!isPullRequestInFlight) {
+    pullButton.disabled = !projectName || isProjectRunning;
+  }
+}
+
+async function loadRunningProjects() {
+  const response = await fetch("/api/running-projects");
+  const result = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(buildErrorMessage("Could not load running project cache", result, "Request failed"));
+  }
+
+  runningProjects = new Set((result.projects || []).map((entry) => entry.name));
+  updateProjectActionState();
+}
+
+async function refreshRunningProjects() {
+  refreshRunningButton.disabled = true;
+  refreshRunningButton.textContent = "Refreshing...";
+
+  try {
+    const response = await fetch("/api/running-projects/refresh", {
+      method: "POST"
+    });
+    const result = await parseJsonResponse(response);
+
+    if (!response.ok) {
+      throw new Error(buildErrorMessage("Could not refresh running-project cache", result, "Request failed"));
+    }
+
+    statusBox.textContent = `Refreshed running-project cache. Cleared ${result.clearedCount || 0} stale entr${result.clearedCount === 1 ? "y" : "ies"}.`;
+    await loadRunningProjects();
+  } catch (error) {
+    const message = `Cache refresh failed: ${error.message}`;
+    statusBox.textContent = message;
+    showErrorCard(message);
+  } finally {
+    refreshRunningButton.disabled = false;
+    refreshRunningButton.textContent = "Refresh Running-Project Cache";
+  }
+}
 
 function renderStatus(run) {
   if (run.error) {
@@ -24,7 +172,10 @@ function renderStatus(run) {
   }
 
   if (run.code === 0) {
-    statusBox.textContent = "Run completed successfully.";
+    const title = run.changeTitle || run.change_title;
+    statusBox.textContent = title
+      ? `Run completed on ${run.branchName || run.branch_name || "new branch"}: ${title}.`
+      : `Run completed on ${run.branchName || run.branch_name || "new branch"}.`;
     return;
   }
 
@@ -35,40 +186,6 @@ function renderStatus(run) {
   }
 
   statusBox.textContent = `Run failed with exit code ${run.code}.`;
-}
-
-function cleanOutput(text) {
-  if (!text) return "";
-
-  // Remove codex header noise if present
-  if (text.includes("--------")) {
-    return text.split("--------").pop().trim();
-  }
-
-  return text.trim();
-}
-
-function renderRun(run) {
-  const credits = run.credits_remaining ?? run.creditsRemaining;
-  const usage = run.usage_delta ?? run.usageDelta;
-
-  promptDetail.textContent = run.prompt || "(none)";
-
-  const parts = [
-    `Run ID: ${run.id ?? run.runId ?? ""}`,
-    `Project: ${run.project_name ?? run.projectName ?? ""}`,
-    credits !== undefined && credits !== null ? `Credits Remaining: ${credits}` : "Credits Remaining: (not available)",
-    `Exit Code: ${run.code ?? ""}`,
-    run.created_at ? `Created: ${run.created_at}` : "",
-    usage !== undefined && usage !== null ? `Usage: ${usage}` : "Usage: (not calculated)",
-    "",
-    "Response",
-    "--------",
-    cleanOutput(run.stdout) || "(none)"
-  ];
-
-  runDetail.textContent = parts.filter(Boolean).join("\n");
-  stderrDetail.textContent = run.stderr || "(none)";
 }
 
 function renderRunsList(runs) {
@@ -84,12 +201,15 @@ function renderRunsList(runs) {
   for (const run of runs) {
     const li = document.createElement("li");
     const button = document.createElement("button");
-    const promptPreview = (run.prompt || "")
-        .replace(/\s+/g, " ")
-        .slice(0, 280)
-        + ((run.prompt || "").length > 280 ? "..." : "");
-    button.textContent = `#${run.id} - ${run.project_name} - ${promptPreview || "(no prompt)"}`;
-    button.onclick = () => loadRunDetail(run.id);
+    const promptPreview = `${(run.prompt || "").replace(/\s+/g, " ").slice(0, 120)}${(run.prompt || "").length > 120 ? "..." : ""}`;
+    const mergeBadge = run.merged_at ? " · merged" : "";
+    const executionMode = run.execution_mode === "write" ? "Write Mode" : "Read Mode";
+    const title = run.change_title ? `\nTitle: ${run.change_title}` : "";
+    button.textContent = `#${run.id} · ${run.project_name} · ${executionMode} · ${run.branch_name || "(no branch)"}${mergeBadge}${title}\n${promptPreview || "(no prompt)"}`;
+    button.onclick = () => {
+      saveEditorState();
+      window.location.href = `/run-details.html?id=${run.id}`;
+    };
     li.appendChild(button);
     runsList.appendChild(li);
   }
@@ -106,15 +226,20 @@ function filterRuns() {
   const filtered = allRuns.filter((run) => {
     const project = (run.project_name || "").toLowerCase();
     const prompt = (run.prompt || "").toLowerCase();
-    return project.includes(query) || prompt.includes(query);
+    const branch = (run.branch_name || "").toLowerCase();
+    return project.includes(query) || prompt.includes(query) || branch.includes(query);
   });
 
   renderRunsList(filtered);
 }
 
 async function loadProjects() {
-  const res = await fetch("/api/projects");
-  const projects = await res.json();
+  const response = await fetch("/api/projects");
+  const projects = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(buildErrorMessage("Could not load projects", projects, "Request failed"));
+  }
 
   projectSelect.innerHTML = "";
   for (const project of projects) {
@@ -123,81 +248,136 @@ async function loadProjects() {
     option.textContent = project.name;
     projectSelect.appendChild(option);
   }
+
+  restoreEditorState(projects);
+  updateProjectActionState();
 }
 
 async function loadRuns() {
-  const res = await fetch("/api/runs");
-  allRuns = await res.json();
+  const response = await fetch("/api/runs");
+  const runs = await parseJsonResponse(response);
+
+  if (!response.ok) {
+    throw new Error(buildErrorMessage("Could not load recent runs", runs, "Request failed"));
+  }
+
+  allRuns = runs;
   filterRuns();
 }
 
-async function loadRunDetail(id) {
-  const res = await fetch(`/api/runs/${id}`);
-  const run = await res.json();
-  renderRun(run);
-  renderStatus(run);
+async function pullSelectedRepository() {
+  const projectName = projectSelect.value;
 
-  if (run.credits_remaining !== undefined) {
-    creditsBox.textContent = `Credits Remaining: ${run.credits_remaining}`;
+  if (!projectName) {
+    statusBox.textContent = "Select a repository before pulling.";
+    return;
+  }
+
+  hideErrorCard();
+  saveEditorState();
+  isPullRequestInFlight = true;
+  pullButton.disabled = true;
+  runButton.disabled = true;
+  pullButton.textContent = "Pulling...";
+  statusBox.textContent = `Pulling latest changes for ${projectName}...`;
+
+  try {
+    const response = await fetch(`/api/projects/${encodeURIComponent(projectName)}/pull`, {
+      method: "POST"
+    });
+    const result = await parseJsonResponse(response);
+
+    if (!response.ok) {
+      const message = buildErrorMessage("Git pull failed", result, "Unknown error.");
+      statusBox.textContent = message;
+      showErrorCard(message);
+      return;
+    }
+
+    const summary = (result.stdout || "Git pull finished.").trim().split("\n").find(Boolean);
+    const branchStatus = (result.gitStatus || "").split("\n").find(Boolean);
+    statusBox.textContent = [summary, branchStatus].filter(Boolean).join(" ");
+  } catch (error) {
+    const message = `Git pull failed: ${error.message}`;
+    statusBox.textContent = message;
+    showErrorCard(message);
+  } finally {
+    isPullRequestInFlight = false;
+    pullButton.textContent = "Git Pull Selected Repo";
+    await loadRunningProjects();
   }
 }
 
 runButton.addEventListener("click", async () => {
   const projectName = projectSelect.value;
   const prompt = promptInput.value.trim();
+  const executionMode = executionModeSelect.value;
 
-  if (!projectName || !prompt) return;
+  if (!projectName || !prompt || runButton.disabled) return;
 
+  hideErrorCard();
+  saveEditorState();
+  isRunningRequestInFlight = true;
   runButton.disabled = true;
   runButton.textContent = "Running...";
-  statusBox.textContent = "Running...";
+  statusBox.textContent = "Creating branch from main and starting Codex...";
 
   try {
-    const res = await fetch("/api/run-test", {
+    const response = await fetch("/api/run-test", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
       },
-      body: JSON.stringify({ projectName, prompt })
+      body: JSON.stringify({ projectName, prompt, executionMode })
     });
 
-    const result = await res.json();
+    const result = await parseJsonResponse(response);
 
-    if (!res.ok) {
+    if (!response.ok) {
       renderStatus(result);
-      runDetail.textContent = "";
-      stderrDetail.textContent = result.error || "(none)";
-      promptDetail.textContent = prompt;
+      showErrorCard(buildErrorMessage("Run failed", result, "Unknown server error."));
       return;
     }
 
-    renderRun({
-      runId: result.runId,
-      code: result.code,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      projectName,
-      prompt,
-      creditsRemaining: result.creditsRemaining ? result.creditsRemaining : "unavailable",
-      usageDelta: result.usageDelta ? result.usageDelta : "unavailable"
-    });
-
     if (result.creditsRemaining !== undefined) {
-       creditsBox.textContent = `Credits Remaining: ${result.creditsRemaining}`;
+      creditsBox.textContent = `Credits Remaining: ${result.creditsRemaining}`;
     }
 
     renderStatus(result);
-    promptInput.value = "";
     await loadRuns();
-  } catch (err) {
-    statusBox.textContent = `Request failed: ${err.message}`;
+  } catch (error) {
+    const message = `Request failed: ${error.message}`;
+    statusBox.textContent = message;
+    showErrorCard(message);
   } finally {
-    runButton.disabled = false;
+    isRunningRequestInFlight = false;
     runButton.textContent = "Run";
+    await loadRunningProjects();
   }
 });
 
+pullButton.addEventListener("click", pullSelectedRepository);
+refreshRunningButton.addEventListener("click", refreshRunningProjects);
+clearStateButton.addEventListener("click", async () => {
+  clearEditorState();
+  await refreshRunningProjects();
+  statusBox.textContent = "Saved form state cleared and running-project cache refreshed.";
+});
+
+[projectSelect, executionModeSelect, promptInput].forEach((element) => {
+  element.addEventListener("change", saveEditorState);
+  element.addEventListener("input", saveEditorState);
+});
+
+projectSelect.addEventListener("change", updateProjectActionState);
 runSearchInput.addEventListener("input", filterRuns);
 
-loadProjects();
-loadRuns();
+(async () => {
+  try {
+    await Promise.all([loadProjects(), loadRuns(), loadRunningProjects()]);
+  } catch (error) {
+    const message = `Initial page load failed: ${error.message}`;
+    statusBox.textContent = message;
+    showErrorCard(message);
+  }
+})();

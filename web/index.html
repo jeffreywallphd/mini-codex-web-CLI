@@ -9,43 +9,52 @@
 <body>
   <main>
     <h1>Codex LAN</h1>
+    <p class="page-copy">Small-screen Codex control for trusted LAN use.</p>
 
-    <label for="projectSelect">Project</label>
-    <select id="projectSelect"></select>
+    <section class="panel stack-gap">
+      <label for="projectSelect">Project</label>
+      <select id="projectSelect"></select>
+      <button id="pullButton" class="secondary-button" type="button">Git Pull Selected Repo</button>
 
-    <label for="promptInput">Prompt</label>
-    <textarea id="promptInput" rows="6" placeholder="Enter prompt..."></textarea>
+      <label for="executionModeSelect">Execution Mode</label>
+      <select id="executionModeSelect">
+        <option value="read">Read Mode</option>
+        <option value="write">Write Mode</option>
+      </select>
 
-    <div id="creditsBox">Credits Remaining: (unknown)</div>
+      <label for="promptInput">Prompt</label>
+      <textarea id="promptInput" rows="6" placeholder="Enter prompt..."></textarea>
 
-    <button id="runButton">Run</button>
+      <div id="creditsBox">Credits Remaining: (unknown)</div>
 
-    <div id="statusBox">Ready.</div>
+      <div class="page-actions">
+        <button id="runButton">Run</button>
+        <button id="refreshRunningButton" class="secondary-button" type="button">Refresh Running-Project Cache</button>
+      </div>
+      <button id="clearStateButton" class="secondary-button" type="button">Clear Saved Form State</button>
+      <p id="runningProjectHint" class="inline-hint" aria-live="polite"></p>
+      <div id="statusBox">Ready.</div>
+    </section>
 
-    <h2>Recent Runs</h2>
+    <section class="panel stack-gap">
+      <div class="section-heading-row">
+        <h2>Recent Runs</h2>
+      </div>
 
-    <label for="runSearchInput">Search Runs</label>
-    <input
-      id="runSearchInput"
-      type="text"
-      placeholder="Search by project or prompt..."
-    />
+      <label for="runSearchInput">Search Runs</label>
+      <input
+        id="runSearchInput"
+        type="text"
+        placeholder="Search by project or prompt..."
+      />
 
-    <ul id="runsList"></ul>
+      <ul id="runsList"></ul>
+    </section>
 
-    <h2>Run Detail</h2>
-
-    <details id="promptCard">
-      <summary>Prompt</summary>
-      <pre id="promptDetail">No prompt available.</pre>
-    </details>
-
-    <details id="stderrCard">
-      <summary>Raw stderr</summary>
-      <pre id="stderrDetail">(none)</pre>
-    </details>
-
-    <pre id="runDetail">No run selected.</pre>
+    <section id="errorCard" class="panel error-card hidden" aria-live="assertive">
+      <h2>Latest Error</h2>
+      <pre id="errorCardMessage"></pre>
+    </section>
   </main>
 
   <script src="/app.js"></script>
