@@ -62,6 +62,9 @@ Your local repositories should live in a separate projects directory referenced 
 
 4. Make sure `PROJECTS_DIR` points at the folder containing the local repositories you want to expose in the UI.
 5. Keep `.env` out of version control.
+6. If you receive errors about the environment being read-only, you will need to find the /.codex/config.toml file (possibly in Users/[youruser]/.codex). If the file doesn't exist, create it. On Windows add the following two lines:
+[windows]
+sandbox = "elevated"
 
 ## Running the Application
 
